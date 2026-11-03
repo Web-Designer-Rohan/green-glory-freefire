@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""OB55 Post-Login Profile Inspector using /GetPlayerPersonalShow"""
+"""OB55 Post-Login Profile Inspector / Personal Show Utility"""
 import sys
 import os
 import json
@@ -81,15 +81,25 @@ def get_latest_account():
         print(f" [!] Manifest directory '{MANIFEST_DIR}' not found.")
         return None
     
+    json_files = glob.glob(os.path.join(MANIFEST_DIR, "*.json"))
+    if json_files:
+        latest_file = max(json_files, key=os.path.getmtime)
+        print(f" [✔] Loaded latest account record: {latest_file}")
+        with open(latest_file, "r", encoding="utf-8") as f:
+            data = json.load(f)
+            if "accounts" in data and len(data["accounts"]) > 0:
+                return data["accounts"][-1]
+            return data
+            
     manifest_files = glob.glob(os.path.join(MANIFEST_DIR, "account_*.json"))
-    if not manifest_files:
-        print(f" [!] No account manifests found.")
-        return None
-    
-    latest_file = max(manifest_files, key=os.path.getmtime)
-    print(f" [✔] Loaded latest account manifest: {latest_file}")
-    with open(latest_file, "r", encoding="utf-8") as f:
-        return json.load(f)
+    if manifest_files:
+        latest_file = max(manifest_files, key=os.path.getmtime)
+        print(f" [✔] Loaded account manifest: {latest_file}")
+        with open(latest_file, "r", encoding="utf-8") as f:
+            return json.load(f)
+            
+    print(f" [!] No account records found in '{MANIFEST_DIR}'. Run main.py first.")
+    return None
 
 def inspect_profile():
     print(f"\n{'-'*55}")
@@ -99,20 +109,17 @@ def inspect_profile():
 
     acc = get_latest_account()
     if not acc:
-        return {"success": False, "error": "No account manifest available."}
+        return {"success": False, "error": "No account record available."}
 
-    uid = acc.get("uid")
+    uid = acc.get("game_id") or acc.get("uid")
     token = acc.get("access_token")
 
     print(f" [✔] Target UID      = {uid}")
     print(f" [✔] Access Token    = {token[:16]}...")
 
     try:
-        # Construct protobuf payload mapping UID (Field 1: int or string)
-        # Using simple TLV encoding for field 1 (UID) and field 2 (unknown flag/type "7")
         uid_int = int(uid)
         
-        # Helper to encode varint
         def encode_varint(n):
             b = bytearray()
             while True:
@@ -125,12 +132,10 @@ def inspect_profile():
                     break
             return bytes(b)
 
+        # Field 1: UID, Field 2: Region flag
         payload_bytes = bytearray()
-        # Field 1 (Variant/Int): UID
         payload_bytes.extend(bytes([(1 << 3) | 0]))
         payload_bytes.extend(encode_varint(uid_int))
-        
-        # Field 2 (Variant/Int): Region/Type flag "7"
         payload_bytes.extend(bytes([(2 << 3) | 0]))
         payload_bytes.extend(encode_varint(7))
 
